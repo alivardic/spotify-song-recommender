@@ -115,7 +115,7 @@ human-in-the-loop evaluation:
 
 ------------------------------------------------------------------------
 
-## 🛠️ App: [ShinyApp.io Interactive Song Finder](#)
+## 🛠️ App: [ShinyApp.io Interactive Song Finder](https://daniel-tafmizi.shinyapps.io/final_proj_shinyapp/)
 
 Based on the evaluation results, we continued forward with our final
 goal: Building a Shiny App that people can use to find new music with

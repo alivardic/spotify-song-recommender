@@ -88,7 +88,7 @@ As we had **no outcome variable**, we couldn’t use traditional metrics like ac
 
 ---
 
-## 🛠️ App: [ShinyApp.io Interactive Song Finder](#)
+## 🛠️ App: [ShinyApp.io Interactive Song Finder](https://daniel-tafmizi.shinyapps.io/final_proj_shinyapp/)
 
 Based on the evaluation results, we continued forward with our final goal: Building a Shiny App that people can use to find new music with our algorithm. We integrated Model 2 into the app due to its performance in the manual evaluation. In the Shiny app, users can:
 
