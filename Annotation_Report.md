@@ -307,7 +307,7 @@ ggplot(music_results, aes(x = Name, y = Model1)) +
   coord_flip() 
 ```
 
-![](Annotation-and-Batch-Functions_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
+![](Annotation_Report_files/figure-gfm/unnamed-chunk-3-1.png)<!-- -->
 
 ``` r
 ggplot(music_results, aes(x = Name, y = Model2)) +
@@ -317,7 +317,7 @@ ggplot(music_results, aes(x = Name, y = Model2)) +
   coord_flip()
 ```
 
-![](Annotation-and-Batch-Functions_files/figure-gfm/unnamed-chunk-3-2.png)<!-- -->
+![](Annotation_Report_files/figure-gfm/unnamed-chunk-3-2.png)<!-- -->
 
 ``` r
 ggplot(music_results, aes(x = Name, y = Model3)) +
@@ -327,7 +327,7 @@ ggplot(music_results, aes(x = Name, y = Model3)) +
   coord_flip()
 ```
 
-![](Annotation-and-Batch-Functions_files/figure-gfm/unnamed-chunk-3-3.png)<!-- -->
+![](Annotation_Report_files/figure-gfm/unnamed-chunk-3-3.png)<!-- -->
 
 ``` r
 ggplot(final_df, aes(x = finalModels, y = finalResults)) +
@@ -336,7 +336,7 @@ ggplot(final_df, aes(x = finalModels, y = finalResults)) +
   labs(x = "Model", y = "Model Accuracy (%)", title = "Final Prediction Accuracy")
 ```
 
-![](Annotation-and-Batch-Functions_files/figure-gfm/unnamed-chunk-3-4.png)<!-- -->
+![](Annotation_Report_files/figure-gfm/unnamed-chunk-3-4.png)<!-- -->
 
 ``` r
 #Faceted Plot
@@ -350,7 +350,7 @@ ggplot(faceted_df, aes(x = Model, y = Accuracy)) +
   theme_classic()
 ```
 
-![](Annotation-and-Batch-Functions_files/figure-gfm/unnamed-chunk-3-5.png)<!-- -->
+![](Annotation_Report_files/figure-gfm/unnamed-chunk-3-5.png)<!-- -->
 
 ``` r
 ggplot(faceted_df, aes(x = Model, y = Accuracy)) +
@@ -359,4 +359,4 @@ ggplot(faceted_df, aes(x = Model, y = Accuracy)) +
   theme_classic()
 ```
 
-![](Annotation-and-Batch-Functions_files/figure-gfm/unnamed-chunk-3-6.png)<!-- -->
+![](Annotation_Report_files/figure-gfm/unnamed-chunk-3-6.png)<!-- -->

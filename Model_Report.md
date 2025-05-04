@@ -60,7 +60,7 @@ corrmatrix <- cor(songs)
 corrplot(corrmatrix, method = 'number')
 ```
 
-![](Models_files/figure-gfm/CORRELATION-1.png)<!-- -->
+![](Model_Report_files/figure-gfm/CORRELATION-1.png)<!-- -->
 
 ``` r
 which(df_combined$track_name == "Another Love")
@@ -205,7 +205,7 @@ abline(v = elbow_k, col = "red", lty = 2)
 text(elbow_k, wss[elbow_k], labels = paste0("k=", elbow_k), pos = 4, col = "red")
 ```
 
-![](Models_files/figure-gfm/K-CLUSTERING-1.png)<!-- -->
+![](Model_Report_files/figure-gfm/K-CLUSTERING-1.png)<!-- -->
 
 ``` r
 ##############################################
@@ -237,7 +237,7 @@ text(silhouette_k, silhouette_scores[silhouette_k - 1], labels = paste("Best k =
      pos = 3, col = "red", cex = 0.9)
 ```
 
-![](Models_files/figure-gfm/K-CLUSTERING-2.png)<!-- -->
+![](Model_Report_files/figure-gfm/K-CLUSTERING-2.png)<!-- -->
 
 ``` r
 ########################################
@@ -275,7 +275,7 @@ ggplot(centers_long, aes(x = feature, y = value, group = cluster, color = cluste
   labs(title = "Cluster Centroid Feature Values", y = "Scaled Value")
 ```
 
-![](Models_files/figure-gfm/K-CLUSTERING-3.png)<!-- -->
+![](Model_Report_files/figure-gfm/K-CLUSTERING-3.png)<!-- -->
 
 ``` r
 library(GGally)
@@ -305,7 +305,7 @@ ggpairs(
   theme_minimal()
 ```
 
-![](Models_files/figure-gfm/CLUSTERING%20PLOT-1.png)<!-- -->
+![](Model_Report_files/figure-gfm/CLUSTERING%20PLOT-1.png)<!-- -->
 
 ## MODEL 2: K-Clustering (K determined via Elbow and Silhouette) then cluster focused KNN
 
@@ -408,7 +408,7 @@ plot(cumulative_variance, type = "b",
 abline(h = 0.90, col = "red", lty = 2)  
 ```
 
-![](Models_files/figure-gfm/PCA-1.png)<!-- -->
+![](Model_Report_files/figure-gfm/PCA-1.png)<!-- -->
 
 ``` r
 num_pcs <- which(cumulative_variance >= 0.90)[1]  
