@@ -1,0 +1,960 @@
+---
+title: "Song Recommendation Algorithms Using K-Means, KNN, and Spotify Echo Nest"
+author: "Alina Hagen, Daniel Tafmizi, Alexander Crowell, Anthony Venson"
+date: "`r Sys.Date()`"
+output: html_document
+runtime: shiny
+---
+
+## Data Munging 
+``` {r, "DATA COMBINATION"}
+library(readr)
+library(tidyverse)
+library(dbplyr)
+songs <- read_csv("enchonest_2.csv")
+songs_2 <- as.data.frame(read_csv("hit_songs_09_19.csv"))
+songs_3 <- read_csv("echonest_3.csv")
+
+deduped_songs <- songs %>%
+  arrange(desc(popularity)) %>% 
+  distinct(artists, track_name, .keep_all = TRUE) %>%
+  select(artists, track_name, duration_ms, popularity, danceability, energy, key, loudness, mode, speechiness, acousticness,instrumentalness, liveness, valence, tempo)
+
+songs_2 <- songs_2 %>%
+  select(artist, song, duration_ms, popularity, danceability, energy, key, loudness, mode, speechiness, acousticness,instrumentalness, liveness, valence, tempo)
+
+deduped_songs2 <- songs_3 %>%
+  arrange(desc(popularity)) %>% 
+  mutate(
+    artist = str_remove_all(artists, "\\[|\\]|'"),   
+    artist = str_trim(artist),
+    track_genre = NA) %>%
+  distinct(artists, name, .keep_all = TRUE) %>%
+  select(artist, name, duration_ms, popularity, danceability, energy, key, loudness, mode, speechiness, acousticness,instrumentalness, liveness, valence, tempo)
+
+colnames(deduped_songs2) <- c("artists", "track_name", "duration_ms", "popularity", "danceability", "energy", "key", "loudness", "mode", "speechiness", "acousticness","instrumentalness", "liveness", "valence", "tempo")
+
+colnames(songs_2) <- c("artists", "track_name", "duration_ms", "popularity", "danceability", "energy", "key", "loudness", "mode", "speechiness", "acousticness","instrumentalness", "liveness", "valence", "tempo")
+
+df_new_only <- anti_join(deduped_songs2, songs_2)
+df_combined <- bind_rows(songs_2, df_new_only)
+df_new_only2 <- anti_join(deduped_songs, df_combined)
+df_combined <- bind_rows(df_combined, df_new_only2)
+
+
+df_combined <- df_combined %>% arrange(desc(popularity)) %>% filter(popularity >50) %>% distinct(artists, track_name, .keep_all = TRUE) %>% distinct(duration_ms, track_name, .keep_all = TRUE) 
+
+write.csv(df_combined, "df_combined.csv")
+
+```
+
+## Load and Prepare Data
+### Look at Data Correlation
+
+``` {r, "DATA LOADING"}
+library(readr)
+library(tidyverse)
+library(dbplyr)
+
+df_combined <- read_csv("df_combined.csv")
+
+# extract song names
+song_name <- df_combined[,(2:3)]
+# Set all as numeric
+songs <- df_combined[c(-1:-3)]
+songs[] <- lapply(songs, function(x) as.numeric(as.character(x)))
+```
+
+``` {r, "CORRELATION"}
+library(corrplot)
+
+corrmatrix <- cor(songs)
+corrplot(corrmatrix, method = 'number')
+
+```
+
+``` {r, "Search Test"} 
+which(df_combined$track_name == "Another Love")
+```
+
+## MODEL 1: SIMPLE KNN ANALYSIS
+
+``` {r, "MODEL 1"}
+if (!require(FNN)) {
+  install.packages("FNN") 
+  library(FNN)
+}
+
+library(FNN)
+
+# 1. Scale data
+songs_scaled <- scale(songs)
+
+# 2. Pick point
+query_point <- songs_scaled[843, , drop = FALSE]
+
+# 3. Find 5 nearest neighbors to point (Report will include the song+5 nearest neighbors so k = 6)
+knn_result <- get.knnx(data = songs_scaled, query = query_point, k = 6)
+
+# 4. Inspect the neighbor indices and distances
+neighbor_indices <- knn_result$nn.index[]
+neighbor_distances <- knn_result$nn.dist[]
+
+# 5. Show actual neighbor rows
+neighbors_data <- song_name[neighbor_indices[1, ], ]
+
+# Print everything
+cat("Nearest neighbors (indices):\n")
+print(neighbor_indices)
+
+cat("\nEuclidian Distances:\n")
+print(neighbor_distances)
+
+cat("\nNeighbor data:\n")
+print(neighbors_data)
+```
+
+## K CLUSTERING DETERMINATION 
+``` {r, "K-CLUSTERING"}
+library(FNN)
+library(cluster)
+library(tidyverse)
+library(reshape2)
+set.seed(42)
+
+# 1. Scale data
+songs_scaled <- scale(songs)
+
+sampled_df <- songs %>% slice_sample(prop = 0.10)
+sample <- scale(sampled_df)
+
+# Two Method K- Cluster Verification 
+############################################################
+## OPTIMAL K ANALYSIS VIA DERIVIATION AND ELBOW DETECTION ##
+############################################################
+
+# Compute WSS valus
+wss <- map_dbl(1:15,  function(k){
+  model <- kmeans(x = sample, centers = k, nstart = 50, iter.max = 100)
+  model$tot.withinss
+})
+
+# Emulate Deriviation Logic with a Descrete function using diff()
+# Compute first and second differences
+first_deriv <- diff(wss)
+second_deriv <- diff(first_deriv)
+
+# Find where the second derivative (Change in first derivative) is below 10%
+elbow_k <- which.max(abs(second_deriv)) + 1
+cat("Optimal k (via second derivative):", elbow_k, "\n")
+
+# Elbow Plot
+plot(1:15, wss, type = "b", pch = 19, 
+     main = "WSS vs. K with Elbow with Automatic Detection via Deriviation",
+     xlab = "Number of Clusters (k)", ylab = "WSS")
+abline(v = elbow_k, col = "red", lty = 2)
+text(elbow_k, wss[elbow_k], labels = paste0("k=", elbow_k), pos = 4, col = "red")
+
+##############################################
+## OPTIMAL K ANALYSIS VIA SILHOUETTE METHOD ##
+##############################################
+
+silhouette_scores <- c()
+
+for (k in 2:12) {
+  km <- kmeans(sample, centers = k, nstart = 50)
+  sil <- silhouette(km$cluster, dist(sample))  # FIXED HERE
+  avg_sil_width <- mean(sil[, 3])   # average silhouette width
+  silhouette_scores <- c(silhouette_scores, avg_sil_width)
+}
+
+silhouette_k <- which.max(silhouette_scores) + 1 
+cat("Optimal k (via silhoutte analysis):", silhouette_k, "\n")
+
+plot(2:12, silhouette_scores, type = "b",
+     xlab = "Number of clusters (k)",
+     ylab = "Average silhouette width",
+     main = "Choosing k with Silhouette Scores")
+points(silhouette_k, silhouette_scores[silhouette_k - 1], col = "red", pch = 19, cex = 1.5)
+text(silhouette_k, silhouette_scores[silhouette_k - 1], labels = paste("Best k =", silhouette_k),
+     pos = 3, col = "red", cex = 0.9)
+
+########################################
+## ELBOW METHOD == SILHOUETTE METHOD? ##
+########################################
+if (elbow_k == silhouette_k) {
+  k = silhouette_k
+  cat("Elbow method and Silhouette method agree: optimal k =", k, ".\n")
+} else {
+  k <- silhouette_k
+  cat("Warning: Elbow and Silhouette suggest different k values.\n")
+}
+
+#############################################
+## K MEANS CLUSTERING WITH OPTIMAL K VALUE ##
+#############################################
+
+kmeans_result <- kmeans(songs_scaled, centers = k)
+
+# Reshape Data to long formt via reshape2
+centers_df <- as.data.frame(kmeans_result$centers)
+centers_df$cluster <- rownames(centers_df)
+centers_long <- pivot_longer(centers_df, -cluster, names_to = "feature", values_to = "value")
+
+# Visualize Cluster Difference Analysis
+ggplot(centers_long, aes(x = feature, y = value, group = cluster, color = cluster)) +
+  geom_line() +
+  geom_point() +
+  theme_minimal() +
+  coord_flip() +
+  labs(title = "Cluster Centroid Feature Values", y = "Scaled Value")
+
+```
+
+``` {r, "CLUSTERING PLOT"}
+library(GGally)
+# Convert to data frame and add cluster
+plot_df <- as.data.frame(songs_scaled) %>%
+  mutate(cluster = factor(kmeans_result$cluster))
+
+# Select the features you want to include
+metrics <- c("popularity", "danceability", "energy", "loudness", "valence")
+
+# Generate the pairplot matrix
+ggpairs(
+  plot_df,
+  columns = which(colnames(plot_df) %in% metrics),
+  aes(color = cluster, alpha = 0.6),
+  upper = list(continuous = wrap("points", size = 0.7)),
+  lower = list(continuous = wrap("points", size = 0.7)),
+  diag = list(continuous = wrap("densityDiag"))
+) +
+  theme_minimal()
+
+```
+
+
+## MODEL 2: K-Clustering (K determined via Elbow and Silhouette) then cluster focused KNN
+
+``` {r, "MODEL 2"}
+##################################################
+## K NEAREST NEIGHBOR WITHIN DETERMINED CLUSTER ##
+##################################################
+
+# Pick a Point
+query_index <- 843
+
+# Identify query's cluster and all songs in that cluster
+query_cluster <- kmeans_result$cluster[query_index]
+cluster_indices <- which(kmeans_result$cluster == query_cluster)
+
+# Subset cluster data
+cluster_songs <- songs_scaled[cluster_indices, , drop = FALSE]
+cluster_song_names <- song_name[cluster_indices, ]
+
+# Get the query song within the cluster
+relative_query_index <- match(query_index, cluster_indices)
+query_cluster_point <- cluster_songs[relative_query_index, , drop = FALSE]
+
+# 5 nearest neighbors (Report will include the song+5 nearest neighbors so k = 6)
+knn_result <- get.knnx(data = cluster_songs, query = query_cluster_point, k = 6)
+
+# Neighbor Results 
+neighbor_indices <- knn_result$nn.index[1, ]
+neighbor_distances <- knn_result$nn.dist[1, ]
+neighbors_data <- cluster_song_names[neighbor_indices, ]
+
+
+####################
+## RESULTS REPORT ##
+####################
+
+cat("Nearest neighbors (indices):\n")
+print(neighbor_indices)
+
+cat("\nEuclidian Distances:\n")
+print(neighbor_distances)
+
+cat("\nNeighbor data:\n")
+print(neighbors_data)
+```
+
+## MODEL 3: K-Clustering (K determined via Elbow and Silhouette), PCA Dimensionality reduction,  then cluster focused KNN with PCA variables
+
+``` {r, "PCA"}
+##################################
+## PCA DIMENSIONALITY REDUCTION ##
+##################################
+pca_result <- prcomp(songs_scaled, scale. = FALSE)  # Already scaled, so scale.=FALSE
+
+explained_variance <- (pca_result$sdev)^2 / sum(pca_result$sdev^2)
+cumulative_variance <- cumsum(explained_variance)
+
+# While I could not find a 100% accepted rule of thumb for acceptable variability thresholds,
+# Shmueli et al. (2017) appears to refer back to roughly 90% variance often in Ch. 4 (Dimensionality   
+# Reduction, page 108), So I am going to use 90% as the variance threshold
+plot(cumulative_variance, type = "b",
+     xlab = "Number of Principal Components",
+     ylab = "Cumulative Explained Variance",
+     main = "Explained Variance by Principal Components")
+abline(h = 0.90, col = "red", lty = 2)  
+
+num_pcs <- which(cumulative_variance >= 0.90)[1]  
+songs_pca <- pca_result$x[, 1:num_pcs]  # Top 5 principal components
+
+```
+
+``` {r, "MODEL 3"}
+#####################################################################
+## K NEAREST NEIGHBOR WITHIN DETERMINED CLUSTER WITH PCA REDUCTION ##
+#####################################################################
+
+# Pick a Point
+query_index <- 843
+
+# Identify query's cluster and all songs in that cluster
+query_cluster <- kmeans_result$cluster[query_index]
+cluster_indices <- which(kmeans_result$cluster == query_cluster)
+
+# Subset cluster data
+cluster_songs <- songs_pca[cluster_indices, , drop = FALSE]
+cluster_song_names <- song_name[cluster_indices, ]
+
+# Get the query song within the cluster
+relative_query_index <- match(query_index, cluster_indices)
+query_cluster_point <- cluster_songs[relative_query_index, , drop = FALSE]
+
+# 5 nearest neighbors (Report will include the song+5 nearest neighbors so k = 6)
+knn_result <- get.knnx(data = cluster_songs, query = query_cluster_point, k = 6)
+
+# Neighbor Results 
+neighbor_indices <- knn_result$nn.index[1, ]
+neighbor_distances <- knn_result$nn.dist[1, ]
+neighbors_data <- cluster_song_names[neighbor_indices, ]
+
+
+####################
+## RESULTS REPORT ##
+####################
+
+cat("Nearest neighbors (indices):\n")
+print(neighbor_indices)
+
+cat("\nEuclidian Distances:\n")
+print(neighbor_distances)
+
+cat("\nNeighbor data:\n")
+print(neighbors_data)
+```
+
+## SPOTIFY API LOOKUP ##
+
+``` {r, "SPOTIFY API KEYS", include = FALSE}
+library(spotifyr)
+
+# Authenticate (client credentials is fine)
+Sys.setenv(SPOTIFY_CLIENT_ID = '[INSERT CLIENT ID]')
+Sys.setenv(SPOTIFY_CLIENT_SECRET = '[INSERT API KEY]')
+Sys.setenv(SPOTIFY_REDIRECT_URI = "http://127.0.0.1:1410/")
+```
+
+``` {r, "LOOK UP LIST"}
+library(stringr)
+
+lookup_list <- neighbors_data %>%
+  mutate(combined = str_c(artists, track_name, sep = " "))
+
+liked <- lookup_list[1,]
+lookup_list <- lookup_list[-1,]
+
+```
+
+``` {r, results='asis'}
+access_token <- get_spotify_access_token()
+
+lookup_list$spotify_url <- NA
+
+for (i in seq_along(lookup_list$combined)) {
+  query <- lookup_list$combined[i]
+
+  result <- tryCatch({
+    search_spotify(query, type = "track", limit = 1, market = "US")
+  }, error = function(e) NULL)
+
+  if (!is.null(result) && nrow(result) > 0) {
+    lookup_list$spotify_url[i] <- result$external_urls.spotify[1]
+  }
+}
+
+recommendations <- paste0(
+  'Try "', lookup_list$track_name, '" by ', lookup_list$artists,
+  ' [Spotify link](', lookup_list$spotify_url, ')', "\n \n \n"
+)
+
+name <- ""  
+name <- paste0(name, liked[1,2])
+artist <- ""  
+artist <- paste0(artist, liked[1,1])
+
+cat("Since you liked", name, "by", artist, "\n\n",
+  recommendations)
+
+```
+
+
+
+
+
+## ANNOTATION CODE ##
+## BATCH QUERY FUNCTIONS ##
+
+```{r, "MODEL 1 Function"}
+library(FNN)
+library(dplyr)
+
+batch_knn_standard <- function(query_indices, songs_scaled, song_name, k) {
+  all_results <- list()
+
+  for (query_index in query_indices) {
+    query_point <- songs_scaled[query_index, , drop = FALSE]
+    knn_result <- get.knnx(data = songs_scaled, query = query_point, k = k + 1)  
+    
+    neighbor_indices <- knn_result$nn.index[1, ]
+    neighbor_distances <- knn_result$nn.dist[1, ]
+
+    # Remove first Neighhor (Self)
+    neighbor_indices <- neighbor_indices[-1]
+    neighbor_distances <- neighbor_distances[-1]
+    
+    # Extract Song Names
+    neighbors_data <- song_name[neighbor_indices, , drop = FALSE]
+
+    # 5. Save neighbors with query_id
+    result_df <- data.frame(
+      query_id = query_index,
+      neighbor_text = apply(neighbors_data, 1, paste, collapse = " - "),
+      stringsAsFactors = FALSE
+    )
+
+    all_results[[as.character(query_index)]] <- result_df
+  }
+
+  final_df <- bind_rows(all_results)
+  return(final_df)
+}
+
+```
+
+```{r, "MODEL 2 and 3 Function"}
+library(FNN)
+library(dplyr)
+
+batch_clustered_knn <- function(query_indices, kmeans_result, data, song_name, k = 6) {
+  all_results <- list()
+
+  for (query_index in query_indices) {
+    # Identify cluster of the query point
+    query_cluster <- kmeans_result$cluster[query_index]
+    cluster_indices <- which(kmeans_result$cluster == query_cluster)
+
+    # Get cluster-specific data
+    cluster_songs <- data[cluster_indices, , drop = FALSE]
+    cluster_song_names <- song_name[cluster_indices, ]
+
+    # Locate query within the cluster
+    relative_query_index <- match(query_index, cluster_indices)
+    query_point <- cluster_songs[relative_query_index, , drop = FALSE]
+
+    # Run KNN in the cluster
+    knn_result <- get.knnx(data = cluster_songs, query = query_point, k = k + 1)
+
+    neighbor_indices <- knn_result$nn.index[1, ]
+    neighbor_indices <- neighbor_indices[neighbor_indices != relative_query_index]  # remove self
+    neighbors_data <- cluster_song_names[neighbor_indices, , drop = FALSE]
+
+    # Build results with query ID
+    result_df <- data.frame(
+      query_id = query_index,
+      neighbor_text = apply(neighbors_data, 1, paste, collapse = " - "),
+      stringsAsFactors = FALSE
+    )
+
+    all_results[[as.character(query_index)]] <- result_df
+  }
+
+  final_df <- bind_rows(all_results)
+  return(final_df)
+}
+
+```
+
+```{r, "SPOTIFY API CALL"}
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(spotifyr)
+
+format_neighbors_with_spotify_urls <- function(neighbors_df, k = 5) {
+  access_token <- get_spotify_access_token()
+
+  # Step 1: Extract artist and track name
+  split_df <- neighbors_df %>%
+    mutate(rank = row_number(),
+           artist = str_trim(str_extract(neighbor_text, "^[^–-]+")),
+           track_name = str_trim(str_remove(neighbor_text, "^[^–-]+[-–]")))
+
+  # Step 2: Lookup Spotify URLs
+  get_spotify_url <- function(artist, track) {
+    query <- paste(artist, track)
+    result <- tryCatch({
+      search_spotify(query, type = "track", limit = 1, market = "US")
+    }, error = function(e) NULL)
+
+    if (!is.null(result) && nrow(result) > 0) {
+      return(result$external_urls.spotify[1])
+    } else {
+      return(NA)
+    }
+  }
+
+  split_df$spotify_url <- mapply(get_spotify_url, split_df$artist, split_df$track_name)
+
+  # Step 3: Rank neighbors per query_id
+  split_df <- split_df %>%
+    group_by(query_id) %>%
+    mutate(rank = row_number()) %>%
+    filter(rank <= k) %>%
+    ungroup()
+
+  # Step 4: Pivot to wide format
+  formatted <- split_df %>%
+    mutate(
+      rec_col = paste0("Model Rec ", rank),
+      url_col = paste0("Song URL ", rank),
+      annotation_col = paste0("Annotation ", rank)
+    ) %>%
+    select(query_id, rank, neighbor_text, spotify_url) %>%
+    pivot_wider(
+      names_from = rank,
+      values_from = c(neighbor_text, spotify_url),
+      names_glue = "{.value} {rank}"
+    )
+
+  # Step 5: Add empty annotation columns
+  for (i in 1:k) {
+    formatted[[paste0("Annotation ", i)]] <- ""
+  }
+
+  # Step 6: Reorder to match Excel layout
+  formatted <- formatted %>%
+    relocate(query_id,
+      starts_with("neighbor_text 1"), starts_with("spotify_url 1"), starts_with("Annotation 1"),
+      starts_with("neighbor_text 2"), starts_with("spotify_url 2"), starts_with("Annotation 2"),
+      starts_with("neighbor_text 3"), starts_with("spotify_url 3"), starts_with("Annotation 3"),
+      starts_with("neighbor_text 4"), starts_with("spotify_url 4"), starts_with("Annotation 4"),
+      starts_with("neighbor_text 5"), starts_with("spotify_url 5"), starts_with("Annotation 5")
+    )
+
+  # Optional: Rename columns for final polish
+  names(formatted) <- names(formatted) %>%
+    str_replace("neighbor_text", "Model Rec") %>%
+    str_replace("spotify_url", "Song URL")
+
+  return(formatted)
+}
+
+```
+
+``` {r}
+# Query songs by index (e.g., row numbers in your scaled data)
+query_set <- c(34,5253,28496,5851,9422,11895,9135,46249,28518,3176) # ALI
+# query_set <- c(13,16,324,2055,1384,29,1235,1433,108,370) # DANIEL
+# query_set <- c(454,162,194,770,1419,9121,9142,5126,26344,5930) #ALEX
+# query_set <- c(57,58,99,129,355,5103,9608,12844,19342) #ANTHONY
+
+
+# Run batch standard KNN
+neighbors_df_s <- batch_knn_standard(
+  query_indices = query_set,
+  songs_scaled = songs_scaled,
+  song_name = song_name,
+  k = 6
+)
+
+# Run batch clustered KNN
+neighbors_df_c <- batch_clustered_knn(
+  query_indices = query_set,
+  kmeans_result = kmeans_result,
+  data = songs_scaled,
+  song_name = song_name,
+  k = 6
+)
+
+# Run batch clustered KNN + PCA
+neighbors_df_pca <- batch_clustered_knn(
+  query_indices = query_set,
+  kmeans_result = kmeans_result,
+  data = songs_pca,
+  song_name = song_name,
+  k = 6
+)
+
+View(neighbors_df_c)
+
+```
+
+```{r}
+model1 <- format_neighbors_with_spotify_urls(neighbors_df_s, k = 5)
+model2 <- format_neighbors_with_spotify_urls(neighbors_df_c, k = 5)
+model3 <- format_neighbors_with_spotify_urls(neighbors_df_pca, k = 5)
+
+#write.csv(model1, "x1.csv")
+#write.csv(model2, "x2.csv")
+#write.csv(model3, "x3.csv")
+
+``` 
+
+
+## EVALUATION RESULTS ##
+|      | Model 1 Songs Liked | Model 1 Songs Disliked | Model 1 Final Percent | Model 2 Songs Liked | Model 2 Songs Disliked | Model 2 Final Percent | Model 3 Songs Liked | Model 3 Songs Disliked | Model 3 Final Percent |
+|------|---------------------|-------------------------|------------------------|---------------------|-------------------------|------------------------|---------------------|-------------------------|------------------------|
+| Alina   | 26                  | 24                      | 0.52                   | 28                  | 22                      | 0.56                   | 33                  | 17                      | 0.66                   |
+| Daniel   | 42                  | 8                       | 0.84                   | 42                  | 8                       | 0.84                   | 37                  | 13                      | 0.74                   |
+| Alex   | 23                  | 27                      | 0.46                   | 25                  | 25                      | 0.50                   | 23                  | 27                      | 0.46                   |
+| Anthony   | 27                  | 23                      | 0.54                   | 28                  | 22                      | 0.56                   | 25                  | 25                      | 0.50                   |
+
+``` {r}
+library(ggplot2)
+
+
+music_results <- read.csv("Book1.csv")
+
+colnames(music_results) <- c('Name', 'Model1', 'Model2', 'Model3')
+
+finalResults <- c(0.59, 0.615, 0.59)
+finalModels <- c("Model 1", "Model 2", "Model 3")
+final_df <- data.frame(finalModels, finalResults)
+
+#Individual Plots
+
+ggplot(music_results, aes(x = Name, y = Model1)) +
+  geom_col(data = music_results, aes(fill = Model1)) +
+  theme(legend.position = "none") +
+  labs(x = "Name", y = "Model Accuracy (%)", title = "Model 1 Prediction Accuracy") +
+  coord_flip() 
+
+ggplot(music_results, aes(x = Name, y = Model2)) +
+  geom_col(data = music_results, aes(fill = Model2)) +
+  theme(legend.position = "none") +
+  labs(x = "Name", y = "Model Accuracy (%)", title = "Model 2 Prediction Accuracy") +
+  coord_flip()
+
+ggplot(music_results, aes(x = Name, y = Model3)) +
+  geom_col(data = music_results, aes(fill = Model3)) +
+  theme(legend.position = "none") +
+  labs(x = "Name", y = "Model Accuracy (%)", title = "Model 3 Prediction Accuracy") +
+  coord_flip()
+
+ggplot(final_df, aes(x = finalModels, y = finalResults)) +
+  geom_col(data = final_df, aes(fill = finalResults)) +
+  theme(legend.position = "none") +
+  labs(x = "Model", y = "Model Accuracy (%)", title = "Final Prediction Accuracy")
+
+
+#Faceted Plot
+
+faceted_df <- read.csv("Book2.csv")
+colnames(faceted_df) <- c("Name", "Model", "Accuracy")
+
+ggplot(faceted_df, aes(x = Model, y = Accuracy)) +
+  geom_bar(stat = "identity", position = "dodge", aes(fill = Name)) +
+  labs(x = "Model", y = "Accuracy (%)", title = "Predictive Model Success Rate") +
+  theme_classic()
+
+ggplot(faceted_df, aes(x = Model, y = Accuracy)) +
+  geom_bar(stat = "identity", aes(fill = Name)) +
+  labs(x = "Model", y = "Combined Accuracy", title = "Total Model Success Rate") +
+  theme_classic()
+
+```
+
+## Shiny App Code 
+
+```{r, "SHINY APP"}
+
+library(shiny)
+library(shinythemes)
+library(FNN)
+library(stringdist)
+library(httr)
+library(base64enc)
+
+# Load data
+clust1 <- read.csv("cluster1.csv")
+clust2 <- read.csv("cluster2.csv")
+
+songs1 <- read.csv("song_name_cluster1.csv")
+songs2 <- read.csv("song_name_cluster2.csv")
+
+# Creates lookup table
+lookup <- data.frame(
+  song_name = c(songs1$full_name, songs2$full_name),
+  cluster_id = c(rep(1, nrow(songs1)), rep(2, nrow(songs2))),
+  stringsAsFactors = FALSE
+)
+
+# Fuzzy matching function
+find_closest_song <- function(input_song_name, lookup_table) {
+  distances <- stringdist::stringdist(tolower(input_song_name), tolower(lookup_table$song_name), method = "jw")
+  sorted_indices <- order(distances)
+  top_indices <- sorted_indices[1:6]
+  top_distances <- distances[top_indices]
+  top_names <- lookup_table$song_name[top_indices]
+  top_clusters <- lookup_table$cluster_id[top_indices]
+  
+  return(data.frame(song_name = top_names, distance = top_distances, cluster_id = top_clusters))
+}
+
+# Function to get a new access token
+get_spotify_access_token <- function(client_id, client_secret) {
+  credentials <- paste(client_id, client_secret, sep = ":")
+  encoded_credentials <- base64encode(charToRaw(credentials))
+  
+  response <- POST(
+    url = "https://accounts.spotify.com/api/token",
+    add_headers(Authorization = paste("Basic", encoded_credentials)),
+    body = list(grant_type = "client_credentials"),
+    encode = "form"
+  )
+  
+  token_info <- content(response)
+  return(token_info$access_token)
+}
+
+# UI
+ui <- fluidPage(
+  theme = shinytheme("darkly"),  # Dark theme
+  
+  tags$style(HTML("
+    .centered-input {
+      width: 100%;
+      display: flex;
+      justify-content: center;
+    }
+    .centered-input input {
+      text-align: center;
+      width: 100%;
+    }
+  ")),
+  
+  tags$div(
+    style = "text-align: center; margin-top: 30px;",
+    tags$h1(
+      "Song Finder",
+      style = "color: white;"
+    )
+  ),
+  
+  fluidRow(
+    column(
+      width = 12,
+      align = "center",
+      div(
+        style = "width: 50%; margin: auto;",
+        div(
+          class = "centered-input",
+          textInput("song_name", 
+                    label = "Enter Song Name: ", 
+                    placeholder = "Song Name - Artist")
+        ),
+        actionButton("find_btn", "Find Song"),
+        br(), br(),
+        uiOutput("advanced_ui")
+      ),
+      br(),
+      div(
+        style = "width: 50%; margin: auto;",
+        textOutput("current_song_name"), 
+        tableOutput("neighbors")
+      ),
+      div(
+        style = "width: 50%; margin: auto; margin-top: 20px;",
+        uiOutput("alternative_songs_ui")
+      ),
+      br(), br(),
+      div(
+        style = "width: 100%; text-align: center; margin-top: 40px; color: grey;",
+        tags$h5("Database is not exhaustive due to new Spotify API restrictions. Limited songs after 2022.")
+      )
+    )
+  )
+)
+
+# Server
+server <- function(input, output, session) {
+  
+  token_reactive <- reactiveVal()
+  top_matches <- reactiveVal()
+  best_match <- reactiveVal()
+  selection_made <- reactiveVal(FALSE)
+  knn_done <- reactiveVal(FALSE)
+  
+  #fill with api keys
+  client_id <- ''
+  client_secret <- ''
+  
+  access_token <- get_spotify_access_token(client_id, client_secret)
+  token_reactive(access_token)
+  
+  # Spotify link search function
+  get_spotify_link <- function(song_title_artist) {
+    query <- URLencode(song_title_artist)
+    url <- paste0("https://api.spotify.com/v1/search?q=", query, "&type=track&limit=1&market=US")
+    
+    response <- GET(
+      url,
+      add_headers(Authorization = paste("Bearer", token_reactive()))
+    )
+    
+    result <- content(response)
+    
+    if (!is.null(result$tracks$items) && length(result$tracks$items) > 0) {
+      return(result$tracks$items[[1]]$external_urls$spotify)
+    } else {
+      return(NA)
+    }
+  }
+  
+  #function to run knn
+  perform_knn <- function(selected_match) {
+    matched_song_name <- selected_match$song_name
+    query_cluster_id <- selected_match$cluster_id
+    
+    if (query_cluster_id == 1) {
+      cluster_data <- clust1
+      cluster_song_names <- songs1
+      relative_query_index <- which(songs1$full_name == matched_song_name)
+    } else {
+      cluster_data <- clust2
+      cluster_song_names <- songs2
+      relative_query_index <- which(songs2$full_name == matched_song_name)
+    }
+    
+    knn_result <- get.knnx(
+      data = cluster_data,
+      query = cluster_data[relative_query_index, , drop = FALSE],
+      k = 6
+    )
+    
+    neighbor_indices <- knn_result$nn.index[1, 2:6]
+    neighbor_distances <- knn_result$nn.dist[1, 2:6]
+    neighbors_data <- cluster_song_names[neighbor_indices, ]
+    
+    return(list(
+      indices = neighbor_indices,
+      distances = neighbor_distances,
+      song_names = neighbors_data$full_name
+    ))
+  }
+  # runs the knn function when find button is clicked
+  observeEvent(input$find_btn, {
+    input_song_name <- input$song_name
+    matches <- find_closest_song(input_song_name, lookup)
+    
+    top_matches(matches)
+    best_match(matches[1, ])
+    
+    selection_made(FALSE)
+    knn_done(FALSE)
+    
+    output$current_song_name <- renderText({
+      paste("Showing Recommendations for:", best_match()$song_name)
+    })
+    
+    output$alternative_songs_ui <- renderUI({
+      selectInput(
+        "alternative_song", 
+        "Not the right song? Check Below:", 
+        choices = c("Alternative Matches" = "", matches$song_name[2:6]),
+        selected = NULL
+      )
+    })
+    
+    knn_results <- perform_knn(best_match())
+    knn_done(TRUE)
+    
+    spotify_links <- sapply(knn_results$song_names, get_spotify_link)
+    
+    output$neighbors <- renderTable({
+      data.frame(
+        Order = 1:5,
+        Song_Name = knn_results$song_names,
+        URLs = sprintf('<a href="%s" target="_blank">Link</a>', spotify_links),
+        stringsAsFactors = FALSE
+      )
+    }, sanitize.text.function = function(x) x)
+  })
+  #renders button after a song has been queried
+  output$advanced_ui <- renderUI({
+    if (knn_done()) {
+      actionButton("show_advanced_btn", "Show Advanced KNN Results")
+    }
+  })
+  #re-runs if sogn from dropdown is chosen
+  observeEvent(input$alternative_song, {
+    if (!selection_made()) {
+      selection_made(TRUE)
+      return()
+    }
+    
+    req(input$alternative_song)
+    selected_song <- input$alternative_song
+    selected_match <- top_matches()[top_matches()$song_name == selected_song, ]
+    
+    best_match(selected_match)
+    
+    output$current_song_name <- renderText({
+      paste("Showing Recommendations for:", best_match()$song_name)
+    })
+    
+    knn_results <- perform_knn(selected_match)
+    knn_done(TRUE)
+    
+    spotify_links <- sapply(knn_results$song_names, get_spotify_link)
+    
+    output$neighbors <- renderTable({
+      data.frame(
+        Order = 1:5,
+        Song_Name = knn_results$song_names,
+        URLs = sprintf('<a href="%s" target="_blank">Link</a>', spotify_links),
+        stringsAsFactors = FALSE
+      )
+    }, sanitize.text.function = function(x) x)
+  })
+  
+  # re-run knnx and observe distance matrix. Fix this...
+  observeEvent(input$show_advanced_btn, {
+    selected_match <- best_match()
+    
+    knn_results <- perform_knn(selected_match)
+    
+    spotify_links <- sapply(knn_results$song_names, get_spotify_link)
+    
+    output$neighbors <- renderTable({
+      data.frame(
+        Neighbor_Index = knn_results$indices,
+        Distance = knn_results$distances,
+        Neighbor_Song = knn_results$song_names,
+        URLs = sprintf('<a href="%s" target="_blank">Link</a>', spotify_links),
+        stringsAsFactors = FALSE
+      )
+    }, sanitize.text.function = function(x) x)
+  })
+  
+} 
+# Run the app
+shinyApp(ui = ui, server = server)
+
+
+
+

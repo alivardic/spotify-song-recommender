@@ -7,7 +7,6 @@ runtime: shiny
 ---
 
 ## Data Munging 
-
 ``` {r, "DATA COMBINATION"}
 library(readr)
 library(tidyverse)
@@ -354,8 +353,8 @@ print(neighbors_data)
 library(spotifyr)
 
 # Authenticate (client credentials is fine)
-Sys.setenv(SPOTIFY_CLIENT_ID = '5b83c7fe870042b492a35d75da13680a')
-Sys.setenv(SPOTIFY_CLIENT_SECRET = '4c27d19dfdec4b0085838cd0f87fd867')
+Sys.setenv(SPOTIFY_CLIENT_ID = '[INSERT CLIENT ID]')
+Sys.setenv(SPOTIFY_CLIENT_SECRET = '[INSERT API KEY]')
 Sys.setenv(SPOTIFY_REDIRECT_URI = "http://127.0.0.1:1410/")
 ```
 
